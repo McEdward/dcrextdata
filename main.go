@@ -51,10 +51,17 @@ func mainCore() error {
 			db.Close()
 			log.Fatal("Could not drop tables: ", err)
 		} else {
-			log.Info("Tables dropped")
-			return err
+			log.Info("Exchange table dropped")
 		}
 
+		err = db.DropTable("pow_stats")
+		if err != nil {
+			db.Close()
+			log.Fatal("Could not drop tables: ", err)
+		} else {
+			log.Info("POW tables dropped")
+			return err
+		}
 	}
 
 	log.Info("Attemping to retrieve exchange data")
@@ -91,7 +98,42 @@ func mainCore() error {
 		}
 	}
 
+	log.Info("Attemping to retrieve POW data")
+	pdata := make([]powDataTick, 0)
+	if exists := db.POWTableExits(); exists {
+		pt, err := db.LastPOWDataTime()
+		if err != nil {
+			if strings.Contains(err.Error(), "no rows") {
+				pt = 0
+			} else {
+				log.Error("Could not retrieve last entry time: ", err)
+				return err
+			}
+		}
+		log.Info("Retireving POW data from ", time.Unix(pt, 0).String())
+		if d, err := collectPOWData(pt); err == nil {
+			pdata = d
+		} else {
+			log.Error("Could not retrieve POW data: ", err)
+			return err
+		}
+	} else {
+		log.Info("Creating new POW data table")
+		if err := db.CreatePOWDataTable(); err != nil {
+			log.Error("Error creating POW data table: ", err)
+			return err
+		}
+		log.Info("Retrieving POW data")
+		if d, err := collectPOWData(0); err == nil {
+			pdata = d
+		} else {
+			log.Error("Could not retrieve POW data: ", err)
+			return err
+		}
+	}
+
 	log.Debug("Collected exchange entry count: ", len(data))
+	log.Debug("Collected POW entry count: ", len(pdata))
 
 	err = db.AddExchangeData(data)
 	if err != nil {
@@ -99,6 +141,13 @@ func mainCore() error {
 		return err
 	}
 	log.Info("Collected entries stored")
+
+	err = db.AddPOWData(pdata)
+	if err != nil {
+		log.Error("Error adding POW entries: ", err)
+		return err
+	}
+	log.Info("Collected POW entries stored")
 
 	quit := make(chan struct{})
 
@@ -122,6 +171,13 @@ func mainCore() error {
 
 		if err != nil {
 			log.Error("Could not retrieve last entry time ", err)
+			wg.Done()
+			return
+		}
+
+		plast, err := db.LastPOWDataTime()
+		if err != nil {
+			log.Error("Could not retrieve last POW entry time ", err)
 			wg.Done()
 			return
 		}
@@ -153,6 +209,20 @@ func mainCore() error {
 					return
 				}
 				log.Info("Added recent exchange data")
+
+				log.Info("Collecting recent pow data")
+				powdata, err := collectPOWData(plast)
+				plast = t.Unix()
+				if err != nil {
+					log.Error("Could not retrieve POW data: ", err)
+					return
+				}
+				err = db.AddPOWData(powdata)
+				if err != nil {
+					log.Error("Error adding POW data entries: ", err)
+					return
+				}
+				log.Info("Added recent POW data")
 			case <-quit:
 				log.Info("Closing collector")
 				return

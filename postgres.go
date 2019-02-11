@@ -17,6 +17,9 @@ var (
 	insertExchangeDataStmt      = `INSERT INTO exchange_data (high, low, open, close, time, exchange) VALUES ($1, $2, $3, $4, $5, $6)`
 	createExchangeDataStmt      = `CREATE TABLE IF NOT EXISTS exchange_data (high FLOAT8, low FLOAT8, open FLOAT8, close FLOAT8, time INT, exchange VARCHAR(25), CONSTRAINT tick PRIMARY KEY (time, exchange))`
 	getLastExchangeDataTimeStmt = `SELECT time FROM exchange_data ORDER BY time DESC LIMIT 1`
+	insertPOWDataStmt           = `INSERT INTO pow_stats (time, network_hashrate, pool_hashrate, workers, network_difficulty, coin_price, btc_price, source) VALUES ($1, $2 ,$3 ,$4 ,$5 ,$6 ,$7, $8)`
+	createPOWDataStmt           = `CREATE TABLE IF NOT EXISTS pow_stats (time INT, network_hashrate INT, pool_hashrate FLOAT, workers INT, network_difficulty FLOAT8, coin_price VARCHAR(25), btc_price VARCHAR(25), source VARCHAR(25), PRIMARY KEY (time, source))`
+	getLastPOWDataTimeStmt      = `SELECT time FROM pow_stats ORDER BY time DESC LIMIT 1`
 )
 
 func NewPgDb(psqlInfo string) (PgDb, error) {
@@ -83,4 +86,39 @@ func (db *PgDb) DropTable(name string) error {
 
 func (db *PgDb) DropExchangeDataTable() error {
 	return db.DropTable("exchange_data")
+}
+
+func (db *PgDb) CreatePOWDataTable() error {
+	_, err := db.Exec(createPOWDataStmt)
+	return err
+}
+
+func (db *PgDb) AddPOWData(data []powDataTick) error {
+	added := 0
+	for _, j := range data {
+		_, err := db.Exec(insertPOWDataStmt, j.Time, j.NetworkHashrate, j.PoolHashrate, j.Workers, j.NetworkDifficulty, j.CoinPrice, j.BtcPrice, j.source)
+		if err != nil {
+			if !strings.Contains(err.Error(), "unique constraint") { // Ignore duplicate entries
+				return err
+			}
+			added++
+		}
+	}
+	log.Debug("Succesfully added pow entries: ", added)
+	return nil
+}
+
+func (db *PgDb) LastPOWDataTime() (int64, error) {
+	var time int64 = -1
+	rows := db.QueryRow(getLastPOWDataTimeStmt)
+	err := rows.Scan(&time)
+
+	if err != nil {
+		return time, err
+	}
+	return time, nil
+}
+func (db *PgDb) POWTableExits() bool {
+	exists, _ := db.tableExists("pow_stats")
+	return exists
 }

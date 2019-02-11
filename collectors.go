@@ -43,6 +43,31 @@ type bittrexAPIResponse struct {
 	Result []bittrexDataTick `json:"result"`
 }
 
+type powDataTick struct {
+	Time              int64
+	NetworkHashrate   int64
+	PoolHashrate      float64
+	Workers           int64
+	NetworkDifficulty float64
+	CoinPrice         string
+	BtcPrice          string
+	source            string
+}
+
+type luxorPowDataTick struct {
+	Time              string  `json:"time"`
+	NetworkHashrate   int64   `json:"network_hashrate"`
+	PoolHashrate      float64 `json:"pool_hashrate"`
+	Workers           int64   `json:"workers"`
+	NetworkDifficulty float64 `json:"network_difficulty"`
+	CoinPrice         string  `json:"coin_price"`
+	BtcPrice          string  `json:"btc_price"`
+}
+
+type luxorAPIResponse struct {
+	GlobalStats []luxorPowDataTick `json:"globalStats"`
+}
+
 var dcrlaunchtime int64 = 1454889600
 
 func collectPoloniexData(start int64) ([]exchangeDataTick, error) {
@@ -140,5 +165,61 @@ func collectExchangeData(start int64) ([]exchangeDataTick, error) {
 	}
 	data = append(data, poloniexdata...)
 	data = append(data, bittrexdata...)
+	return data, nil
+}
+
+func collectLuxorData(start int64) ([]powDataTick, error) {
+	client := &http.Client{Timeout: 300 * time.Second}
+
+	// Luxor "start" option doesn't work
+	res, err := client.Get("https://mining.luxor.tech/API/DCR/stats/")
+
+	if err != nil {
+		return nil, err
+	}
+
+	data := new(luxorAPIResponse)
+	err = json.NewDecoder(res.Body).Decode(data)
+
+	if err != nil {
+		return nil, err
+	}
+
+	res.Body.Close()
+
+	powData := make([]powDataTick, 0)
+
+	for _, v := range data.GlobalStats {
+		t, _ := time.Parse(time.RFC3339, v.Time)
+
+		if t.Unix() < start {
+			continue
+		}
+
+		pData := powDataTick{
+			Time:              t.Unix(),
+			NetworkHashrate:   v.NetworkHashrate,
+			PoolHashrate:      v.PoolHashrate,
+			Workers:           v.Workers,
+			NetworkDifficulty: v.NetworkDifficulty,
+			CoinPrice:         v.CoinPrice,
+			BtcPrice:          v.BtcPrice,
+			source:            "luxor",
+		}
+		powData = append(powData, pData)
+	}
+
+	return powData, nil
+}
+
+func collectPOWData(start int64) ([]powDataTick, error) {
+	data := make([]powDataTick, 0)
+
+	luxordata, err := collectLuxorData(start)
+	if err != nil {
+		log.Error("Error: ", err)
+		return nil, err
+	}
+	data = append(data, luxordata...)
 	return data, nil
 }
